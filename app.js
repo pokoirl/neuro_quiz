@@ -1,6 +1,6 @@
 /* Neuro Quiz — spaced repetition on the schematic book. Typed answers only.
    Progress is stored on this phone under its own key (does not touch the vessel quiz). */
-const KEY = 'neuroquiz_v1', VERSION = '1.1';
+const KEY = 'neuroquiz_v1', VERSION = '1.2';
 const DAY0 = 4;                                    // the day starts at 04:00
 const today = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 6e4 - DAY0 * 36e5) / 864e5);
 const S = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { return {} } })();
@@ -127,37 +127,88 @@ const newLeft = () => Math.max(0, S.goal - (S.newDay[today()] || 0));
 
 /* ---------------- figure rendering ---------------- */
 const NS = 'http://www.w3.org/2000/svg';
+function vivid(c) {                                // a saturated colour (structure), as opposed to white/greys/beige context
+  if (!c || c[0] !== '#' || (c.length !== 7 && c.length !== 4)) return false;
+  if (c.length === 4) c = '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+  const r = parseInt(c.slice(1, 3), 16), g = parseInt(c.slice(3, 5), 16), b = parseInt(c.slice(5, 7), 16), mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  return mx > 0 && ((mx - mn) / mx > 0.10 || mx < 200);      // any tint, or a dark fill (e.g. dark grey zones)
+}
+function centreOf(svg, el) {                      // centre of an element in the figure's own coordinates (handles group shifts)
+  const bb = el.getBBox(), p = svg.createSVGPoint(); p.x = bb.x + bb.width / 2; p.y = bb.y + bb.height / 2;
+  const q = p.matrixTransform(svg.getScreenCTM().inverse().multiply(el.getScreenCTM())); return { x: q.x, y: q.y, w: bb.width, h: bb.height };
+}
 function drawFig(c, reveal, zoom) {
   const F = FIGS[c.f], box = $('#fig');
-  box.innerHTML = F.svg + '<span class="hint">' + (zoom ? 'tap: whole figure' : 'tap: zoom on the ring') + '</span>';
-  const svg = box.querySelector('svg');
-  let ax = c.x, ay = c.y;
-  if (!c.lead) {                                     // label sits on its structure: ring its real drawn centre
-    const t = svg.querySelector(`text[data-k="${c.k}"]`), bb = t.getBBox(), p = svg.createSVGPoint();
-    p.x = bb.x + bb.width / 2; p.y = bb.y + bb.height / 2;
-    const q = p.matrixTransform(svg.getScreenCTM().inverse().multiply(t.getScreenCTM())); ax = q.x; ay = q.y;
-  }
+  box.innerHTML = F.svg + '<span class="hint">' + (zoom ? 'tap: whole figure' : 'tap: zoom on it') + '</span>';
+  const svg = box.querySelector('svg'), showAll = reveal && box.dataset.all === '1';
+  // 1. labels and leader lines: hidden while asking; after the answer only the target's own label (or all, on request)
   svg.querySelectorAll('text[data-k]').forEach(t => {
-    const k = +t.dataset.k;
-    if (k === c.k) {
-      if (reveal) { t.setAttribute('fill', reveal === 'ok' ? '#2e7d32' : '#c62828'); t.setAttribute('font-weight', '700'); }
-      else {
-        const bb = t.getBBox(), r = document.createElementNS(NS, 'rect');
-        r.setAttribute('x', bb.x - 4); r.setAttribute('y', bb.y - 3); r.setAttribute('width', Math.max(46, bb.width + 8)); r.setAttribute('height', bb.height + 6);
-        r.setAttribute('rx', 6); r.setAttribute('fill', '#e53935'); t.removeAttribute('stroke'); t.parentNode.insertBefore(r, t);
-        t.textContent = '?'; t.setAttribute('fill', '#fff'); t.setAttribute('font-weight', '700'); t.setAttribute('x', bb.x + Math.max(46, bb.width + 8) / 2 - 8);
-        t.removeAttribute('text-anchor');
-      }
-    } else if (!(reveal && box.dataset.all === '1')) t.style.visibility = 'hidden';
+    const mine = +t.dataset.k === c.k;
+    if (mine && reveal) { t.setAttribute('fill', reveal === 'ok' ? '#2e7d32' : '#c62828'); t.setAttribute('font-weight', '700'); }
+    else if (!showAll) t.style.display = 'none';
   });
-  if (c.lead) for (const cls of ['ring', 'ring2']) {
+  const near = (a, b) => Math.abs(a[0] - b[0]) < 1.5 && Math.abs(a[1] - b[1]) < 1.5;
+  svg.querySelectorAll('polyline[stroke="#9aa5ab"]').forEach(l => {
+    const p0 = l.getAttribute('points').trim().split(/\s+/)[0].split(',').map(Number);
+    const mine = c.lead && near(p0, [c.x, c.y]);
+    if (!(showAll || (reveal && mine))) l.style.display = 'none';
+  });
+  svg.querySelectorAll('circle[r="2.6"][fill="#37474f"]').forEach(d => {
+    const mine = c.lead && near([+d.getAttribute('cx'), +d.getAttribute('cy')], [c.x, c.y]);
+    if (!(showAll || (reveal && mine))) d.style.display = 'none';
+  });
+  // 2. the structure to name keeps its colour with a red outline; every other named structure goes grey
+  const T = [];
+  svg.querySelectorAll('[data-n]').forEach(el => { if (el.getAttribute('data-n') === c.a) T.push(el); });
+  if (!showAll) svg.querySelectorAll('polygon, polyline, path, circle, ellipse, line, rect').forEach(el => {
+    if (T.includes(el) || el.closest('clipPath')) return;            // everything coloured that is not the target turns grey
+    const f = el.getAttribute('fill'), st = el.getAttribute('stroke');
+    if (vivid(f)) { el.setAttribute('fill', el.tagName === 'polygon' ? '#e4e0da' : '#b8bfc4'); if (el.tagName === 'polygon') { el.setAttribute('stroke', '#d3ccc3'); el.setAttribute('stroke-width', '1'); } }
+    if (vivid(st) && !/^#(a89886|9e9488)$/i.test(st)) el.setAttribute('stroke', '#b8bfc4');
+  });
+  let ax = c.x, ay = c.y, small = true;
+  if (T.length) {
+    T.forEach(el => {
+      const tag = el.tagName, under = el.cloneNode();
+      under.removeAttribute('data-n');
+      if (tag === 'polygon') { el.setAttribute('stroke', '#e53935'); el.setAttribute('stroke-width', '4'); el.setAttribute('fill-opacity', '1'); }
+      else if (tag === 'circle') { under.setAttribute('r', +el.getAttribute('r') + 5); under.setAttribute('fill', '#e53935'); under.setAttribute('stroke', 'none'); el.parentNode.insertBefore(under, el); }
+      else { under.setAttribute('stroke', '#e53935'); under.setAttribute('stroke-width', (+el.getAttribute('stroke-width') || 3) + 7); under.removeAttribute('stroke-dasharray'); el.parentNode.insertBefore(under, el); }
+      el.parentNode.appendChild(el);                       // bring to front
+    });
+    // centre: the copy nearest the label's anchor (the labelled side)
+    let best = null;
+    T.forEach(el => { const q = centreOf(svg, el), d = Math.hypot(q.x - c.x, q.y - c.y); if (!best || d < best.d) best = { ...q, d }; });
+    ax = best.x; ay = best.y; small = Math.max(best.w, best.h) < 45;
+  }
+  if (small || !T.length) for (const cls of ['ring2']) {      // tiny structures: a pulsing ring so they are easy to find
     const r = document.createElementNS(NS, 'circle'); r.setAttribute('cx', ax); r.setAttribute('cy', ay); r.setAttribute('r', 14); r.setAttribute('class', cls);
     svg.appendChild(r);
   }
-  if (zoom) {
-    const w = 560, h = Math.round(w * 1.15), x = Math.min(Math.max(ax - w / 2, 0), F.w - w), y = Math.min(Math.max(ay - h / 2, 78), F.h - h);
+  // crop to the drawing itself (labels are hidden, so the label column and page margins are dead space)
+  if (!showAll) {
+    const B = contentBox(svg), pad = 14;
+    let x = B.x0 - pad, y = B.y0 - pad, w = B.x1 - B.x0 + 2 * pad, h = B.y1 - B.y0 + 2 * pad;
+    if (zoom) {                                           // zoom: a window half the size of the drawing, centred on the target
+      const zw = Math.max(w / 2, 260), zh = Math.max(h / 2, 260);
+      x = Math.min(Math.max(ax - zw / 2, x), x + w - zw); y = Math.min(Math.max(ay - zh / 2, y), y + h - zh); w = zw; h = zh;
+    }
     svg.setAttribute('viewBox', `${x} ${y} ${w} ${h}`);
+    box.style.maxHeight = '62vh'; svg.style.maxHeight = '62vh';
   }
+}
+function contentBox(svg) {                       // union of every drawn shape except the page background, leaders and legend
+  const inv = svg.getScreenCTM().inverse(); let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  svg.querySelectorAll('polygon, polyline, path, circle, ellipse').forEach(el => {
+    if (el.style.display === 'none' || el.closest('clipPath') || el.closest('defs')) return;
+    const bb = el.getBBox(); if (!bb.width && !bb.height) return;
+    const m = inv.multiply(el.getScreenCTM());
+    for (const [px, py] of [[bb.x, bb.y], [bb.x + bb.width, bb.y + bb.height], [bb.x, bb.y + bb.height], [bb.x + bb.width, bb.y]]) {
+      const p = svg.createSVGPoint(); p.x = px; p.y = py; const q = p.matrixTransform(m);
+      x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y);
+    }
+  });
+  return { x0, y0, x1, y1 };
 }
 
 /* ---------------- screens ---------------- */
@@ -217,7 +268,7 @@ function next() {
   $('#htitle').textContent = `Tier ${cur.t} · ${F.sec}`;
   app.innerHTML = `<div class="meta">${isNew ? '<b style="color:#00897b">NEW</b> · ' : ''}${esc(F.sub)}</div>
     <div id="fig"></div>
-    <input id="ans" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Name the ringed structure">
+    <input id="ans" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Name the highlighted structure">
     <div class="two"><button class="btn alt" id="idk">Don't know</button><button class="btn" id="chk">Check</button></div>
     <div id="out"></div>`;
   drawFig(cur, null, zoom);
