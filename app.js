@@ -1,6 +1,6 @@
 /* Neuro Quiz — spaced repetition on the schematic book. Typed answers only.
    Progress is stored on this phone under its own key (does not touch the vessel quiz). */
-const KEY = 'neuroquiz_v1', VERSION = '1.2';
+const KEY = 'neuroquiz_v1', VERSION = '1.3';
 const DAY0 = 4;                                    // the day starts at 04:00
 const today = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 6e4 - DAY0 * 36e5) / 864e5);
 const S = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { return {} } })();
@@ -101,10 +101,13 @@ function grade(c, right) {
   if (!x) { x = S.cards[c.id] = { ivl: 0, ease: 2.5, due: d, seen: d, n: 0, lapses: 0 }; S.newDay[d] = (S.newDay[d] || 0) + 1; }
   x.n++;
   if (right) {
-    x.ivl = x.ivl < 1 ? 1 : x.ivl < 3 ? 3 : Math.round(x.ivl * x.ease);
+    if (isNew) x.ivl = 7;                                   // known on first sight: skip 1 and 3 days
+    else if (x.failedToday === d) x.ivl = 1;                // got it after missing it today: check again tomorrow
+    else if (x.back) { x.ivl = x.back; delete x.back; }     // passed the next-day check after a lapse: resume at a fifth of the old gap
+    else x.ivl = x.ivl < 3 ? 3 : Math.round(x.ivl * x.ease);
     x.ease = Math.min(3.0, x.ease + (x.failedToday === d ? 0 : 0.05));
   } else {
-    if (!isNew && x.ivl >= 1) x.lapses++;
+    if (!isNew && x.ivl >= 1) { x.lapses++; x.back = Math.max(3, Math.round(x.ivl * 0.2)); }
     x.ease = Math.max(1.3, x.ease - 0.2); x.ivl = 0; x.failedToday = d;
   }
   x.due = x.ivl ? nextWork(d + x.ivl) : d;               // never due on a weekend or holiday
