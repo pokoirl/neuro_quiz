@@ -51,6 +51,11 @@ input#ans:focus{outline:none;border-color:#00897b}
 <main id="app"></main>
 <script src="data.js"></script>
 <script src="app.js"></script>
-<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
+<script>if ('serviceWorker' in navigator) {
+  // when a new version takes over, reload once so it shows straight away
+  const had = !!navigator.serviceWorker.controller; let done = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !done) { done = true; location.reload(); } });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+}</script>
 </body>
 </html>

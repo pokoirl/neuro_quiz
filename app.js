@@ -1,6 +1,6 @@
 /* Neuro Quiz — spaced repetition on the schematic book. Typed answers only.
    Progress is stored on this phone under its own key (does not touch the vessel quiz). */
-const KEY = 'neuroquiz_v1', VERSION = '1.4';
+const KEY = 'neuroquiz_v1', VERSION = '1.5';
 const DAY0 = 4;                                    // the day starts at 04:00
 const today = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 6e4 - DAY0 * 36e5) / 864e5);
 const S = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { return {} } })();
