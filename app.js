@@ -1,6 +1,6 @@
 /* Neuro Quiz — spaced repetition on the schematic book. Typed answers only.
    Progress is stored on this phone under its own key (does not touch the vessel quiz). */
-const KEY = 'neuroquiz_v1', VERSION = '1.3';
+const KEY = 'neuroquiz_v1', VERSION = '1.4';
 const DAY0 = 4;                                    // the day starts at 04:00
 const today = () => Math.floor((Date.now() - new Date().getTimezoneOffset() * 6e4 - DAY0 * 36e5) / 864e5);
 const S = (() => { try { return JSON.parse(localStorage.getItem(KEY)) || {} } catch (e) { return {} } })();
@@ -15,9 +15,26 @@ function norm(s) {
   s = s.replace(/[→–—\-\/,:;.()'’"|+]/g, ' ').replace(/\s+/g, ' ').trim();
   s = s.replace(/\bfibers\b/g, 'fibres').replace(/\bfiber\b/g, 'fibre').replace(/\bgray\b/g, 'grey').replace(/\bcenter\b/g, 'centre')
        .replace(/\bnuclei\b/g, 'nucleus').replace(/\bnu\b/g, 'nucleus').replace(/\bthe\b/g, '').replace(/\bcn (\d{1,2})\b/g, (m, d) => 'cn ' + (ROMAN[+d] || d))
-       .replace(/\bcranial nerve\b/g, 'cn');
+       .replace(/\bcranial nerve\b/g, 'cn').replace(/\bof\b/g, ' ');
+  s = s.split(/\s+/).map(w => ABBR[w] || w).join(' ');       // abbreviations → full words (on both the answer and what you type)
+  for (const [re, to] of ALT) s = s.replace(re, to);         // other wordings of the same structure
   return s.replace(/\s+/g, ' ').trim();
 }
+// unambiguous abbreviations only (VA = visceral afferent in the book, so it is left out)
+const ABBR = { a: 'artery', art: 'artery', aa: 'arteries', v: 'v', pca: 'posterior cerebral artery', aca: 'anterior cerebral artery', mca: 'middle cerebral artery',
+  ica: 'internal carotid artery', ba: 'basilar artery', pica: 'posterior inferior cerebellar artery', aica: 'anterior inferior cerebellar artery',
+  sca: 'superior cerebellar artery', pcom: 'posterior communicating artery', pcomm: 'posterior communicating artery', pcoa: 'posterior communicating artery',
+  acom: 'anterior communicating artery', acomm: 'anterior communicating artery', acoa: 'anterior communicating artery', acha: 'anterior choroidal artery', achoa: 'anterior choroidal artery',
+  mlf: 'medial longitudinal fasciculus', vpl: 'ventral posterolateral nucleus', vpm: 'ventral posteromedial nucleus', lgn: 'lateral geniculate nucleus', lgb: 'lateral geniculate nucleus',
+  mgn: 'medial geniculate nucleus', mgb: 'medial geniculate nucleus', sn: 'substantia nigra', stn: 'subthalamic nucleus', plic: 'posterior limb internal capsule',
+  alic: 'anterior limb internal capsule', pprf: 'pprf', csf: 'csf', nts: 'solitary nucleus', cst: 'corticospinal tract', dcml: 'dorsal column medial lemniscus',
+  sss: 'superior sagittal sinus', iss: 'inferior sagittal sinus', icv: 'internal cerebral vein', vog: 'great cerebral vein', ew: 'ew' };
+const ALT = [[/\bbasilar trunk\b/g, 'basilar artery'], [/\bspinothalamic( tract)?\b/g, 'anterolateral system'],
+  [/\b(great )?vein galen\b/g, 'great cerebral vein'], [/\bgalen vein\b/g, 'great cerebral vein'],
+  [/\bnucleus solitarius\b/g, 'solitary nucleus'], [/\bnucleus tractus solitarius\b/g, 'solitary nucleus'],
+  [/\bsylvian aqueduct\b/g, 'cerebral aqueduct'], [/\baqueduct sylvius\b/g, 'cerebral aqueduct'],
+  [/\bedinger westphal\b/g, 'ew'], [/\bpontine paramedian reticular formation\b/g, 'pprf'], [/\bparamedian pontine reticular formation\b/g, 'pprf'],
+  [/\bcerebrospinal fluid\b/g, 'csf'], [/\bfourth ventricle\b/g, '4th ventricle'], [/\bthird ventricle\b/g, '3rd ventricle']];
 function alts(label) {
   const A = new Set([label]);
   const base = label.replace(/\s*\([^)]*\)/g, '').trim(); A.add(base);
@@ -27,6 +44,8 @@ function alts(label) {
   if (base.includes(' / ')) base.split(' / ').forEach(x => A.add(x));
   if (base.includes(' — ')) A.add(base.replace(' — ', ' '));
   if (/ nucleus$/i.test(base)) A.add(base.replace(/ nucleus$/i, ''));
+  if (/ (tract|artery)$/i.test(base)) A.add(base.replace(/ (tract|artery)$/i, ''));   // "corticospinal", "basilar"
+  if (base.includes(', ')) A.add(base.split(', ').reverse().join(' '));                  // "Internal capsule, posterior limb" = "posterior limb of internal capsule"
   return [...A].map(norm).filter(x => x.length);
 }
 function softAlts(label) {                                   // half-answers that should prompt "almost", never count as right on their own
@@ -43,16 +62,29 @@ function lev(a, b) {
 }
 const sim = (a, b) => 1 - lev(a, b) / Math.max(a.length, b.length);
 const sorted = s => s.split(' ').sort().join(' ');
+// opposite words are never a typo: "posterior" for "anterior", "superior" for "inferior"…; segment numbers (A1/P1, C4/C5) must match exactly
+const OPP = [['anterior', 'posterior'], ['superior', 'inferior'], ['medial', 'lateral'], ['dorsal', 'ventral'], ['left', 'right'], ['internal', 'external'],
+  ['rostral', 'caudal'], ['ascending', 'descending'], ['afferent', 'efferent'], ['cervical', 'cerebral'], ['anterolateral', 'posterolateral'],
+  ['anteromedial', 'posteromedial'], ['ventromedial', 'ventrolateral'], ['dorsomedial', 'dorsolateral'], ['posterolateral', 'posteromedial'],
+  ['anterolateral', 'anteromedial'], ['crossed', 'uncrossed'], ['ipsilateral', 'contralateral'], ['sensory', 'motor'], ['upper', 'lower'],
+  ['greater', 'lesser'], ['major', 'minor'], ['deep', 'superficial'], ['anterior', 'inferior'], ['posterior', 'superior'], ['inferior', 'posterior'], ['superior', 'anterior'],
+  ['lateral', 'ventral'], ['medial', 'dorsal']];
+function clash(u, a) {
+  const U = new Set(u.split(' ')), A = new Set(a.split(' '));
+  if (OPP.some(([x, y]) => (U.has(x) && !A.has(x) && A.has(y)) || (U.has(y) && !A.has(y) && A.has(x)))) return true;
+  return [...U].some(w => /\d/.test(w) && !A.has(w));
+}
 function check(input, label) {
   const u = norm(input); if (!u) return 'bad';
   let best = 0;
   for (const a of alts(label)) {
+    if (clash(u, a)) continue;
     if (u === a) return 'ok';
     if (a.length <= 4 || u.length <= 3) continue;            // abbreviations must be exact
     best = Math.max(best, sim(u, a), sim(sorted(u), sorted(a)));
   }
   if (best >= 0.88) return 'ok';
-  for (const a of softAlts(label)) if (sim(u, a) >= 0.85) return 'almost';
+  for (const a of softAlts(label)) if (!clash(u, a) && sim(u, a) >= 0.85) return 'almost';
   return best >= 0.70 ? 'almost' : 'bad';
 }
 
