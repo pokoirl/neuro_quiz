@@ -56,6 +56,28 @@ input#ans:focus{outline:none;border-color:#00897b}
   const had = !!navigator.serviceWorker.controller; let done = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !done) { done = true; location.reload(); } });
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
-}</script>
+  // ask the phone never to delete the offline copy (14 MB of figures) when storage runs low
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+}
+// offline badge: green only when every file the app needs is saved on the phone
+(() => {
+  const b = document.createElement('span'); b.id = 'offb';
+  b.style.cssText = 'font-size:12px;padding:2px 8px;border-radius:10px;margin-left:8px;white-space:nowrap;background:#eee;color:#555';
+  b.textContent = '…'; document.getElementById('htitle').after(b);
+  const set = ok => { b.textContent = ok ? '✈️ Offline OK' : '⚠️ Not offline yet'; b.style.background = ok ? '#e3f4e8' : '#fdecea'; b.style.color = ok ? '#1e6b3a' : '#a12a1f'; };
+  const check = async () => {
+    try {
+      if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) return set(false);
+      for (const k of await caches.keys()) {
+        if (!k.startsWith('neuroquiz-')) continue;
+        const c = await caches.open(k), need = ['./', 'index.html', 'app.js', 'data.js'];
+        if ((await Promise.all(need.map(f => c.match(f)))).every(Boolean)) return set(true);
+      }
+      set(false);
+    } catch (e) { set(false); }
+  };
+  check(); setTimeout(check, 3000); setInterval(check, 15000);
+  if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('controllerchange', () => setTimeout(check, 1000));
+})();</script>
 </body>
 </html>

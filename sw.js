@@ -1,6 +1,6 @@
 // Offline cache. With signal: the app's code and page come fresh from the site (latest version at once);
 // without signal: everything comes from the copy on the phone. data.js (14 MB figures) is only re-downloaded when CACHE changes.
-const CACHE = 'neuroquiz-1.5';
+const CACHE = 'neuroquiz-1.6';
 const FILES = ['./', 'index.html', 'app.js', 'data.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => {
   // cache:'reload' skips the browser's own short-term cache, so a new version never stores old files
